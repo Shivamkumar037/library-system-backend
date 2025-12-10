@@ -72,20 +72,41 @@ public class CloudinaryManager {
                 Cloudinary client = cloudinaryClients.get(i);
                 try {
                     // Upload karne ki koshish karein
+                    // resource_type: "auto" is best, but we fix the URL later
                     result = client.uploader().upload(fileToUpload, ObjectUtils.asMap(
                             "resource_type", "auto",
                             "folder", "library-system-files"));
 
-                    // Agar upload successful hua, toh yahi ruk jayein aur result return karein
                     String publicId = (String) result.get("public_id");
-                    String thumbnailUrl = client.url().transformation(
-                                    new com.cloudinary.Transformation().width(300).quality("auto").crop("fill"))
-                            .type("upload").generate(publicId);
+                    String secureUrl = (String) result.get("secure_url");
+                    
+                    // --- CRITICAL FIX START ---
+                    // "We cannot open" error fix:
+                    // Force download flag (fl_attachment) in the URL being saved to DB.
+                    // This ensures browser/app treats it as a file download, not an image preview.
+                    String downloadUrl = secureUrl;
+                    if (secureUrl.contains("/upload/")) {
+                        downloadUrl = secureUrl.replace("/upload/", "/upload/fl_attachment/");
+                    }
+                    // --- CRITICAL FIX END ---
+
+                    // Thumbnail generation (Safe Mode)
+                    // Added try-catch because if file is 'raw' (like zip), this transformation fails
+                    String thumbnailUrl = "";
+                    try {
+                        thumbnailUrl = client.url().transformation(
+                                        new com.cloudinary.Transformation().width(300).quality("auto").crop("fill"))
+                                .type("upload").generate(publicId);
+                    } catch (Exception e) {
+                        // If thumbnail fails, use a default placeholder or empty string
+                        thumbnailUrl = downloadUrl; 
+                        System.out.println("Thumbnail generation skipped for non-image file.");
+                    }
 
                     System.out.println("Upload successful on Account #" + (i + 1));
 
                     return Map.of(
-                            "url", (String) result.get("secure_url"),
+                            "url", downloadUrl, // Return the FIXED download URL
                             "public_id", publicId,
                             "thumbnail_url", thumbnailUrl,
                             "account_used", "Account " + (i + 1)

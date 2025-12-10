@@ -23,45 +23,45 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                // 1. CSRF disable karna zaroori hai REST APIs ke liye
-                .csrf(AbstractHttpConfigurer::disable)
-                // 2. CORS configuration apply karein
-                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+            // 1. CSRF disable karein (APIs ke liye zaroori)
+            .csrf(AbstractHttpConfigurer::disable)
+            
+            // 2. CORS ko explicit activate karein
+            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+            
+            // 3. Permissions set karein
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/**").permitAll() // Abhi ke liye sab allow hai (Testing)
+            )
+            
+            // 4. Stateless Session (JWT style)
+            .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
 
-                // 3. Authorization Rules
-                .authorizeHttpRequests(auth -> auth
-                        // Public Endpoints (Login/Register/Home Page)
-                        .requestMatchers("/api/auth/**", "/api/books/recent", "/api/books/details/**").permitAll()
-
-                        // Admin Endpoints: Sirf admin role allowed
-                        .requestMatchers("/api/admin/**").hasAuthority("ADMIN") // Assuming role is managed in User model
-
-                        // Baki saare endpoints ke liye authentication zaroori hai
-                        .anyRequest().authenticated()
-                )
-
-                // 4. Session Management: REST API ke liye stateless session
-                .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
-
-        // Note: Real application mein JWT filter add karna hoga.
         return http.build();
     }
 
-    // CORS configuration for allowing frontend access
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        // Frontend ka URL yahan add karein (ya sab allow karne ke liye "*")
-        configuration.setAllowedOrigins(List.of("*"));
+        
+        // FIX: Sabhi origins (*) ko allow karein
+        // setAllowedOriginPatterns use karein taaki Credentials (Cookies) bhi allow ho sakein
+        configuration.setAllowedOriginPatterns(List.of("*")); 
+        
+        // Methods: GET, POST, PUT, DELETE, OPTIONS sab allow karein
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        
+        // Headers: Authorization, Content-Type, etc.
         configuration.setAllowedHeaders(List.of("*"));
+        
+        // Credentials allow karein
         configuration.setAllowCredentials(true);
+        
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
     }
 
-    // Password Hashing ke liye Bean
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();

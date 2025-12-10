@@ -5,7 +5,7 @@ import com.library.model.User;
 import com.library.service.LibraryService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.*; // Includes CrossOrigin
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
@@ -13,26 +13,26 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api")
+// FIX: Ye line sabhi origins (frontend links) ko allow karti hai
+@CrossOrigin(origins = "*") 
 public class LibraryController {
 
     @Autowired
     private LibraryService service;
 
-    // --- Authentication (Modified) ---
+    // --- Authentication ---
 
     @PostMapping("/auth/register")
     public ResponseEntity<?> register(@RequestBody Map<String, String> payload) {
         try {
-            // New User Registration: Requires all fields (name, email, password, mobile)
             User user = new User();
             user.setName(payload.get("name"));
             user.setEmail(payload.get("email"));
             user.setPassword(payload.get("password"));
             user.setMobile(payload.get("mobile"));
 
-            // refCode check for Admin (optional)
             User savedUser = service.registerUser(user, payload.get("refCode"));
-            savedUser.setPassword(null); // Hide password in response
+            savedUser.setPassword(null);
             return ResponseEntity.ok(savedUser);
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -42,7 +42,6 @@ public class LibraryController {
     @PostMapping("/auth/login")
     public ResponseEntity<?> login(@RequestBody Map<String, String> payload) {
         try {
-            // Old User Login: Requires email/username and password
             User user = service.loginUser(payload.get("email"), payload.get("password"));
             user.setPassword(null);
             return ResponseEntity.ok(user);
@@ -55,13 +54,11 @@ public class LibraryController {
 
     @GetMapping("/books/recent")
     public ResponseEntity<List<Book>> getRecentBooks() {
-        // Fetch last 35 uploaded books for the home page (name and thumbnail)
         return ResponseEntity.ok(service.getRecentBooks(35));
     }
 
     @GetMapping("/books/details/{bookId}")
     public ResponseEntity<?> getBookDetails(@PathVariable Long bookId) {
-        // Provide download link, description, uploader name, and first page image
         try {
             Book book = service.getBookDetails(bookId);
             return ResponseEntity.ok(book);
@@ -76,7 +73,6 @@ public class LibraryController {
     public ResponseEntity<?> uploadBook(
             @RequestParam("bookName") String bookName,
             @RequestParam("description") String description,
-            // Authenticated user's ID/Email from frontend/session for permission tracking
             @RequestParam("uploaderIdentifier") String uploaderIdentifier,
             @RequestParam("file") MultipartFile file) {
         try {
@@ -89,14 +85,13 @@ public class LibraryController {
 
     @GetMapping("/books/user/{identifier}")
     public ResponseEntity<List<Book>> getBooksByUser(@PathVariable String identifier) {
-        // Search books uploaded by a specific user (username/email/ID)
         return ResponseEntity.ok(service.getBooksByUploader(identifier));
     }
 
     @PutMapping("/books/{bookId}")
     public ResponseEntity<?> updateBook(
             @PathVariable Long bookId,
-            @RequestParam("updaterIdentifier") String updaterIdentifier, // Current logged-in user
+            @RequestParam("updaterIdentifier") String updaterIdentifier,
             @RequestBody Map<String, String> payload) {
         try {
             Book updatedBook = service.updateBookDetails(
@@ -113,7 +108,7 @@ public class LibraryController {
     @DeleteMapping("/books/{bookId}")
     public ResponseEntity<?> deleteBook(
             @PathVariable Long bookId,
-            @RequestParam("deleterIdentifier") String deleterIdentifier) { // Current logged-in user
+            @RequestParam("deleterIdentifier") String deleterIdentifier) {
         try {
             service.deleteBook(bookId, deleterIdentifier);
             return ResponseEntity.ok(Map.of("message", "Book deleted successfully"));
@@ -122,12 +117,10 @@ public class LibraryController {
         }
     }
 
-
-    // --- Admin Actions (Requires Admin Role) ---
+    // --- Admin Actions ---
 
     @GetMapping("/admin/users")
     public ResponseEntity<List<User>> getAllUsers(@RequestParam String adminIdentifier) {
-        // Admin login check will be done in service layer
         return ResponseEntity.ok(service.getAllUsers(adminIdentifier));
     }
 
@@ -151,7 +144,6 @@ public class LibraryController {
             service.deleteUser(userId, adminIdentifier);
             return ResponseEntity.ok(Map.of("message", "User deleted successfully"));
         } catch (Exception e) {
-
             return ResponseEntity.status(403).body(Map.of("error", e.getMessage()));
         }
     }

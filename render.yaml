@@ -1,35 +1,27 @@
 # Render Blueprint Specification
 # Ye file batati hai ki Render ko kaun kaun si services deploy karni hain.
-# Aap isse apne project ki root directory me rakhiye.
+# Ismein indentation (spaces) ka dhyan rakha gaya hai taki YAML error na aaye.
 
 services:
   # 1. Web Service (Aapka Spring Boot Backend)
   - type: web
-    # Service ka naam
     name: library-system-backend
-    # Aapka GitHub repository
     repo: https://github.com/Shivamkumar037/library-system-backend
-    # Jo branch deploy karni hai
     branch: main
-    # Service ko deploy karne ke liye 'Docker' ka use karein
     dockerContext: .
-    # **YAHAN PATH THEEK KIYA GAYA HAI**
-    # Render ab Dockerfile ko 'library-system' folder ke andar dhoondega.
+    # Dockerfile ka path sub-folder ke andar set kiya gaya hai:
     dockerfilePath: library-system/Dockerfile
-    # Jo port aapka Spring Boot app use kar raha hai (application.properties mein check karein, default 8080 hota hai)
+    # ✅ Port number sahi tarah se indent kiya gaya hai
     port: 8080
-    # Service ki region (apne paas ki location select karein)
-    region: oregon # ya 'singapore' ya 'frankfurt' select kar sakte hain
-    # Environment variables (Agar aapko database URL, Cloudinary API keys, ya koi aur setting deni hai)
+    region: oregon 
+    
     envVars:
-      # Apni zarurat ke hisab se environment variables yahan add karein
+      # Apni zarurat ke hisab se environment variables yahan daalni hain:
       - key: DATABASE_URL
-        value: # Apne database ki URL yahan daalein
+        value: # <-- Yahan apni Live Database URL daalein
       - key: CLOUDINARY_API_KEY
-        value: # Cloudinary key yahan daalein
+        value: # <-- Yahan apni Cloudinary API Key daalein
       - key: SPRING_PROFILES_ACTIVE
-        value: prod # Production profile set karein
-
-    # Instance type (Plan) - 'starter' sabse chhota aur free ya kam kharch wala plan hota hai
-    # Agar aap free plan use kar rahe hain toh 'starter' rakhein
+        value: prod 
+    
     plan: starter

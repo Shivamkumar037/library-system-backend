@@ -72,7 +72,6 @@ public class CloudinaryManager {
                 Cloudinary client = cloudinaryClients.get(i);
                 try {
                     // Upload karne ki koshish karein
-                    // resource_type: "auto" is best, but we fix the URL later
                     result = client.uploader().upload(fileToUpload, ObjectUtils.asMap(
                             "resource_type", "auto",
                             "folder", "library-system-files"));
@@ -80,33 +79,40 @@ public class CloudinaryManager {
                     String publicId = (String) result.get("public_id");
                     String secureUrl = (String) result.get("secure_url");
                     
-                    // --- FIX START: Force Download URL ---
-                    // "We cannot open" error fix:
-                    // Hum URL mein '/upload/' ko '/upload/fl_attachment/' se replace kar rahe hain.
-                    // Isse browser file ko open karne ki bajaye seedha download karega.
+                    // --- IMPORTANT FIX: Check Resource Type ---
+                    // Hum check karenge ki Cloudinary ne isse 'image' maana hai ya 'raw'
+                    String resourceType = (String) result.get("resource_type");
+
                     String downloadUrl = secureUrl;
-                    if (secureUrl.contains("/upload/")) {
+
+                    // SIRF agar ye 'image' hai, tabhi hum fl_attachment lagaenge.
+                    // Raw files (jo PDFs raw ban gayi hain) unpar ye flag lagane se link toot jata hai.
+                    if ("image".equals(resourceType) && secureUrl.contains("/upload/")) {
                         downloadUrl = secureUrl.replace("/upload/", "/upload/fl_attachment/");
                     }
-                    // --- FIX END ---
+                    // Agar resourceType "raw" hai, toh URL ko mat chhedo. Raw URLs usually direct download hote hain.
 
                     // Thumbnail generation (Safe Mode)
-                    // Added try-catch because if file is 'raw' (like zip), this transformation fails
                     String thumbnailUrl = "";
                     try {
-                        thumbnailUrl = client.url().transformation(
-                                        new com.cloudinary.Transformation().width(300).quality("auto").crop("fill"))
-                                .type("upload").generate(publicId);
+                        // Thumbnail sirf image type ke liye generate karein
+                        if ("image".equals(resourceType)) {
+                            thumbnailUrl = client.url().transformation(
+                                            new com.cloudinary.Transformation().width(300).quality("auto").crop("fill"))
+                                    .type("upload").generate(publicId);
+                        } else {
+                            // Raw file ke liye wahi URL use karein (ya koi static icon)
+                            thumbnailUrl = downloadUrl;
+                        }
                     } catch (Exception e) {
-                        // If thumbnail fails, use a default placeholder or empty string
                         thumbnailUrl = downloadUrl; 
                         System.out.println("Thumbnail generation skipped for non-image file.");
                     }
 
-                    System.out.println("Upload successful on Account #" + (i + 1));
+                    System.out.println("Upload successful on Account #" + (i + 1) + " [" + resourceType + "]");
 
                     return Map.of(
-                            "url", downloadUrl, // Return the FIXED download URL
+                            "url", downloadUrl, 
                             "public_id", publicId,
                             "thumbnail_url", thumbnailUrl,
                             "account_used", "Account " + (i + 1)
@@ -132,13 +138,11 @@ public class CloudinaryManager {
     }
 
     public void delete(String publicId) throws Exception {
-        // Delete ke liye humein pata nahi kis account pe file hai, isliye sab par delete command bhejenge.
-        // Jo account file hold nahi karta, wo ignore karega.
+        // Delete logic remains same
         for (Cloudinary client : cloudinaryClients) {
             try {
                 client.uploader().destroy(publicId, ObjectUtils.emptyMap());
             } catch (Exception e) {
-                // Ignore delete errors on secondary accounts
             }
         }
     }

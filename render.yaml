@@ -1,0 +1,34 @@
+# Render Blueprint Specification
+# Ye file batati hai ki Render ko kaun kaun si services deploy karni hain.
+# Aap isse apne project ki root directory me rakhiye.
+
+services:
+  # 1. Web Service (Aapka Spring Boot Backend)
+  - type: web
+    # Service ka naam
+    name: library-system-backend
+    # Aapka GitHub repository
+    repo: https://github.com/Shivamkumar037/library-system-backend
+    # Jo branch deploy karni hai
+    branch: main
+    # Service ko deploy karne ke liye 'Docker' ka use karein
+    dockerContext: .
+    # Aapki Dockerfile root directory me hai
+    dockerfilePath: Dockerfile
+    # Jo port aapka Spring Boot app use kar raha hai (application.properties mein check karein, default 8080 hota hai)
+    port: 8080
+    # Service ki region (apne paas ki location select karein)
+    region: oregon # ya 'singapore' ya 'frankfurt' select kar sakte hain
+    # Environment variables (Agar aapko database URL, Cloudinary API keys, ya koi aur setting deni hai)
+    envVars:
+      # Apni zarurat ke hisab se environment variables yahan add karein
+      - key: DATABASE_URL
+        value: # Apne database ki URL yahan daalein
+      - key: CLOUDINARY_API_KEY
+        value: # Cloudinary key yahan daalein
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod # Production profile set karein
+
+    # Instance type (Plan) - 'starter' sabse chhota aur free ya kam kharch wala plan hota hai
+    # Agar aap free plan use kar rahe hain toh 'starter' rakhein
+    plan: starter

@@ -12,13 +12,12 @@ COPY . .
 # Note: Final JAR file banega: /app/target/library-system-0.0.1-SNAPSHOT.jar
 RUN mvn clean package -DskipTests
 
-# Stage 2: Minimal Runtime Environment
-# Sirf JRE use karein, image size chota rakhne ke liye
-FROM openjdk:17-jre-slim
+# Stage 2: Minimal Runtime Environment (FIXED)
+# Ab hum openjdk:17-jre use kar rahe hain jo available hai.
+FROM openjdk:17-jre
 WORKDIR /app
 
 # Stage 1 se final JAR file copy karein. JAR ka naam pom.xml ke hisaab se hona chahiye.
-# Agar version 0.0.1-SNAPSHOT se change hua hai, toh isse badalna padega.
 # Ye naam assume karta hai ki pom.xml ka <artifactId> 'library-system' hai.
 COPY --from=build /app/target/library-system-0.0.1-SNAPSHOT.jar app.jar
 

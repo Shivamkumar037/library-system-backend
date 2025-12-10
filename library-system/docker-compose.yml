@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: library-system-backend
+    ports:
+      - "8080:8080" # Host port : Container port
+    environment:
+      # Agar aap database use kar rahe hain to yahan details override kar sakte hain
+      - SPRING_PROFILES_ACTIVE=dev
+    restart: always

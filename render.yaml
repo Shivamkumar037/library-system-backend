@@ -1,27 +1,8 @@
-# Render Blueprint Specification
-# Ye file batati hai ki Render ko kaun kaun si services deploy karni hain.
-# Ismein indentation (spaces) ka dhyan rakha gaya hai taki YAML error na aaye.
-
 services:
-  # 1. Web Service (Aapka Spring Boot Backend)
   - type: web
     name: library-system-backend
-    repo: https://github.com/Shivamkumar037/library-system-backend
-    branch: main
-    dockerContext: .
-    # Dockerfile ka path sub-folder ke andar set kiya gaya hai:
-    dockerfilePath: library-system/Dockerfile
-    # ✅ Port number sahi tarah se indent kiya gaya hai
-    port: 8080
-    region: oregon 
-    
-    envVars:
-      # Apni zarurat ke hisab se environment variables yahan daalni hain:
-      - key: DATABASE_URL
-        value: # <-- Yahan apni Live Database URL daalein
-      - key: CLOUDINARY_API_KEY
-        value: # <-- Yahan apni Cloudinary API Key daalein
-      - key: SPRING_PROFILES_ACTIVE
-        value: prod 
-    
-    plan: starter
+    env: docker
+    plan: free
+    region: oregon
+    rootDir: library-system
+    dockerfilePath: Dockerfile

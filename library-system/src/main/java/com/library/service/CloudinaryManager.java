@@ -80,15 +80,15 @@ public class CloudinaryManager {
                     String publicId = (String) result.get("public_id");
                     String secureUrl = (String) result.get("secure_url");
                     
-                    // --- CRITICAL FIX START ---
+                    // --- FIX START: Force Download URL ---
                     // "We cannot open" error fix:
-                    // Force download flag (fl_attachment) in the URL being saved to DB.
-                    // This ensures browser/app treats it as a file download, not an image preview.
+                    // Hum URL mein '/upload/' ko '/upload/fl_attachment/' se replace kar rahe hain.
+                    // Isse browser file ko open karne ki bajaye seedha download karega.
                     String downloadUrl = secureUrl;
                     if (secureUrl.contains("/upload/")) {
                         downloadUrl = secureUrl.replace("/upload/", "/upload/fl_attachment/");
                     }
-                    // --- CRITICAL FIX END ---
+                    // --- FIX END ---
 
                     // Thumbnail generation (Safe Mode)
                     // Added try-catch because if file is 'raw' (like zip), this transformation fails

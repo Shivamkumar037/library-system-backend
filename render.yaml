@@ -13,8 +13,9 @@ services:
     branch: main
     # Service ko deploy karne ke liye 'Docker' ka use karein
     dockerContext: .
-    # Aapki Dockerfile root directory me hai
-    dockerfilePath: Dockerfile
+    # **YAHAN PATH THEEK KIYA GAYA HAI**
+    # Render ab Dockerfile ko 'library-system' folder ke andar dhoondega.
+    dockerfilePath: library-system/Dockerfile
     # Jo port aapka Spring Boot app use kar raha hai (application.properties mein check karein, default 8080 hota hai)
     port: 8080
     # Service ki region (apne paas ki location select karein)

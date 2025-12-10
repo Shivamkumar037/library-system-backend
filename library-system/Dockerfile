@@ -13,4 +13,5 @@ ENV PORT=8080
 EXPOSE 8080
 
 # Run the JAR (note: check the exact jar name in target/)
-CMD ["sh", "-c", "java -jar target/backend-0.0.1-SNAPSHOT.jar --server.port=${PORT}"]
+CMD ["sh", "-c", "java -jar target/library-system-0.0.1-SNAPSHOT.jar --server.port=${PORT}"]
+

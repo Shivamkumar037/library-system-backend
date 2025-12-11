@@ -10,7 +10,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.file.Files;
+import java.nio.file.Files; 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -50,6 +50,7 @@ public class CloudinaryManager {
     // --- LOGIC 1: Validation ---
     private String getTargetFolder(String filename) throws IOException {
         String lower = filename.toLowerCase();
+        // Here we map file extensions to the documents folder
         if (lower.endsWith(".pdf") || lower.endsWith(".doc") || lower.endsWith(".docx")) return "library-system/documents";
         if (lower.matches(".*\\.(jpg|jpeg|png)$")) return "library-system/images";
         throw new IOException("Only PDF, DOCX, and Image files are allowed.");
@@ -67,7 +68,7 @@ public class CloudinaryManager {
             try {
                 Map result = currentAccount.uploader().upload(tempFile, params);
                 result.put("account_index", i);
-
+                
                 if (tempFile.exists()) tempFile.delete();
 
                 System.out.println("Upload successful on Account " + (i + 1));
@@ -83,31 +84,45 @@ public class CloudinaryManager {
         throw new IOException("All 5 Cloudinary accounts are full or unavailable. Upload failed.");
     }
 
-    // --- LOGIC 3: Smart URL Generation (FIXED) ---
+    // --- LOGIC 3: Smart URL Generation (FINAL FIX for Download Format) ---
     public String generateDownloadUrl(String publicId, String resourceType) {
         if (cloudinaryAccounts.isEmpty()) return "";
-
+        
+        // Flags to force download behavior
         Transformation t = new Transformation().flags("attachment");
+        String finalResourceType = resourceType; 
 
-        // 🔥 FIX: Agar resourceType 'image' hai, lekin publicId document folder mein hai (jaisa ki aapka case hai),
-        // toh hum download ke liye format ko PDF/DOCX mein force kar denge.
-        if ("image".equals(resourceType) && publicId.contains("documents")) {
-            t.fetchFormat("pdf"); // PDF files ko PDF format mein download karna force karega
-            resourceType = "raw"; // Best practice: download ke liye raw resource type use karein
+        // If it's a document (PDF, DOCX)
+        if (publicId.contains("documents")) {
+            // Force Cloudinary to treat it as a 'raw' file (best for documents)
+            finalResourceType = "raw";
+            
+            // We strip any format transformation on the file itself to maintain original quality,
+            // relying on the raw resource type and original extension for correct download.
+            // If the original upload was PDF, Cloudinary will serve PDF.
+        } else if ("image".equals(resourceType)) {
+             // For standard images, keep resourceType as image
+             finalResourceType = "image";
         }
-
-        return cloudinaryAccounts.get(0).url()
-                .resourceType(resourceType)
+        
+        String url = cloudinaryAccounts.get(0).url()
+                .resourceType(finalResourceType)
                 .transformation(t)
                 .generate(publicId);
+                
+        System.out.println("Generated Download URL: " + url);
+        
+        return url;
     }
 
     public String generatePreviewUrl(String publicId, String resourceType) {
         if (cloudinaryAccounts.isEmpty()) return "";
         // Preview hamesha image format mein generate hoga (page 1)
-        if ("image".equals(resourceType) || "pdf".equals(resourceType)) {
+        // Note: width(400) limits the quality for faster loading.
+        if ("image".equals(resourceType) || publicId.contains("documents")) { 
             return cloudinaryAccounts.get(0).url()
                     .resourceType("image")
+                    // Note: No format specified here, let Cloudinary determine optimal JPG quality
                     .transformation(new Transformation().width(400).crop("limit").page(1).fetchFormat("jpg"))
                     .generate(publicId);
         }

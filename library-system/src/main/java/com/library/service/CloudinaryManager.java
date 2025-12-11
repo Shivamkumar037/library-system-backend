@@ -43,13 +43,20 @@ public class CloudinaryManager {
         }
     }
 
+    // --- LOGIC 1: Validation (STRICT PDF ONLY) ---
     private String getTargetFolder(String filename) throws IOException {
         String lower = filename.toLowerCase();
-        if (lower.endsWith(".pdf") || lower.endsWith(".doc") || lower.endsWith(".docx")) return "library-system/documents";
-        if (lower.matches(".*\\.(jpg|jpeg|png)$")) return "library-system/images";
-        throw new IOException("Only PDF, DOCX, and Image files are allowed.");
+        
+        // 🔥 FIX: Only allow PDF files for upload
+        if (lower.endsWith(".pdf")) {
+            return "library-system/documents";
+        }
+        
+        // Reject all other file types (DOCX, Images, etc.)
+        throw new IOException("Invalid file type. Only PDF files are allowed.");
     }
 
+    // --- LOGIC 2: Multi-Account Upload (Failover) ---
     public Map<String, Object> uploadFile(MultipartFile file) throws IOException {
         String folder = getTargetFolder(Objects.requireNonNull(file.getOriginalFilename()));
         File tempFile = convert(file);
@@ -72,15 +79,15 @@ public class CloudinaryManager {
         throw new IOException("All 5 Cloudinary accounts are full or unavailable.");
     }
 
-    // 🔥 FIX: Remove logic that forces 'raw'. Trust the 'resourceType' from DB.
+    // 🔥 FIX: Generate Download URL without forcing raw/image type changes.
+    // We rely on the attachment flag and the original file's extension.
     public String generateDownloadUrl(String publicId, String resourceType) {
         if (cloudinaryAccounts.isEmpty()) return "";
         
-        // 'attachment' flag forces the browser to download the file instead of opening it
         Transformation t = new Transformation().flags("attachment");
         
-        // Important: We use the resourceType that was saved during upload (image or raw).
-        // If we force 'raw' for a PDF stored as 'image', we get a 404 error.
+        // PDF files are best accessed using their initial resource type (image or auto) 
+        // with the attachment flag.
         
         return cloudinaryAccounts.get(0).url()
                 .resourceType(resourceType) 
@@ -88,22 +95,20 @@ public class CloudinaryManager {
                 .generate(publicId);
     }
 
+    // Preview Logic: Still generates page 1 as JPG for thumbnail display
     public String generatePreviewUrl(String publicId, String resourceType) {
         if (cloudinaryAccounts.isEmpty()) return "";
-        // Only generate image previews for resources stored as images (includes PDFs)
-        if ("image".equals(resourceType)) {
-            return cloudinaryAccounts.get(0).url()
-                    .resourceType("image")
-                    .transformation(new Transformation().width(400).crop("limit").page(1).fetchFormat("jpg"))
-                    .generate(publicId);
-        }
-        return "https://placehold.co/400x600?text=Document+Preview";
+        
+        // PDF previews are always generated as images
+        return cloudinaryAccounts.get(0).url()
+                .resourceType("image")
+                .transformation(new Transformation().width(400).crop("limit").page(1).fetchFormat("jpg"))
+                .generate(publicId);
     }
 
     public void deleteFile(String publicId) {
         for (Cloudinary account : cloudinaryAccounts) {
             try {
-                // Try deleting as both types just in case
                 account.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "image"));
                 account.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "raw"));
             } catch (Exception ignored) {}

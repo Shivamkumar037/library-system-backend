@@ -1,126 +1,121 @@
 package com.library.service;
 
-import com.cloudinary.Cloudinary;
-import com.cloudinary.Transformation;
-import com.cloudinary.utils.ObjectUtils;
-import org.springframework.beans.factory.annotation.Value;
+import com.library.model.Book;
+import com.library.model.User;
+import com.library.repository.BookRepository;
+import com.library.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
-
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.nio.file.Files; 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 @Service
-public class CloudinaryManager {
+public class LibraryService {
 
-    private final List<Cloudinary> cloudinaryAccounts = new ArrayList<>();
+    @Autowired private UserRepository userRepository;
+    @Autowired private BookRepository bookRepository;
+    @Autowired private CloudinaryManager cloudinaryManager;
 
-    public CloudinaryManager(
-            @Value("${cloudinary.acc1.name}") String n1, @Value("${cloudinary.acc1.key}") String k1, @Value("${cloudinary.acc1.secret}") String s1,
-            @Value("${cloudinary.acc2.name}") String n2, @Value("${cloudinary.acc2.key}") String k2, @Value("${cloudinary.acc2.secret}") String s2,
-            @Value("${cloudinary.acc3.name}") String n3, @Value("${cloudinary.acc3.key}") String k3, @Value("${cloudinary.acc3.secret}") String s3,
-            @Value("${cloudinary.acc4.name}") String n4, @Value("${cloudinary.acc4.key}") String k4, @Value("${cloudinary.acc4.secret}") String s4,
-            @Value("${cloudinary.acc5.name}") String n5, @Value("${cloudinary.acc5.key}") String k5, @Value("${cloudinary.acc5.secret}") String s5
-    ) {
-        addAccount(n1, k1, s1);
-        addAccount(n2, k2, s2);
-        addAccount(n3, k3, s3);
-        addAccount(n4, k4, s4);
-        addAccount(n5, k5, s5);
+    // --- Helper Method ---
+    private User findUserByEmail(String email) throws Exception {
+        return userRepository.findByEmail(email).orElseThrow(() -> new Exception("User not found"));
     }
 
-    private void addAccount(String name, String key, String secret) {
-        if (name != null && !name.isEmpty()) {
-            cloudinaryAccounts.add(new Cloudinary(ObjectUtils.asMap(
-                    "cloud_name", name, "api_key", key, "api_secret", secret, "secure", true
-            )));
+    // --- USER ---
+    public User register(User user, String secretCode) throws Exception {
+        if (userRepository.findByEmail(user.getEmail()).isPresent()) {
+            throw new Exception("Email already exists.");
         }
+        user.setRole("ADMIN_SECRET_CODE".equals(secretCode) ? User.Role.ADMIN : User.Role.STUDENT);
+        return userRepository.save(user);
     }
 
-    // --- LOGIC 1: Validation (STRICT PDF ONLY) ---
-    private String getTargetFolder(String filename) throws IOException {
-        String lower = filename.toLowerCase();
-        
-        // 🔥 FIX: Only allow PDF files for upload
-        if (lower.endsWith(".pdf")) {
-            return "library-system/documents";
+    public User login(String email, String password) throws Exception {
+        User user = findUserByEmail(email);
+        if (!user.getPassword().equals(password)) throw new Exception("Wrong password");
+        if (!user.isActive()) throw new Exception("Account is banned.");
+
+        user.setLastLogin(java.time.LocalDateTime.now());
+        return userRepository.save(user);
+    }
+
+    // --- BOOK ---
+    @Transactional
+    public Book uploadBook(String title, String desc, MultipartFile file, String email) throws Exception {
+        User uploader = findUserByEmail(email);
+        if (!uploader.isActive()) throw new Exception("You are banned from uploading.");
+
+        Map<String, Object> result = cloudinaryManager.uploadFile(file);
+
+        String publicId = (String) result.get("public_id");
+        String resType = (String) result.get("resource_type");
+        String format = (String) result.get("format");
+        Long bytes = Long.valueOf(result.get("bytes").toString());
+
+        String dlUrl = cloudinaryManager.generateDownloadUrl(publicId, resType);
+        String thumbUrl = cloudinaryManager.generatePreviewUrl(publicId, resType);
+
+        Book book = new Book();
+        book.setBookName(title);
+        book.setDescription(desc);
+        book.setDownloadUrl(dlUrl);
+        book.setThumbnailUrl(thumbUrl);
+
+        book.setPublicId(publicId);
+        book.setResourceType(resType);
+
+        book.setFileFormat(format);
+        book.setFileSize(bytes);
+        book.setUploadedByUserId(uploader.getId());
+        book.setUploadedByUserName(uploader.getName());
+
+        return bookRepository.save(book);
+    }
+
+    public List<Book> getRecent() {
+        return bookRepository.findTop50ByOrderByUploadDateDesc();
+    }
+
+    public Book getBook(Long id) throws Exception {
+        return bookRepository.findById(id).orElseThrow(() -> new Exception("Book not found"));
+    }
+
+    // 🔥 FIX: Increment download count AND dynamically regenerate the correct download URL
+    @Transactional
+    public String trackDownload(Long bookId) throws Exception {
+        Book book = getBook(bookId);
+        book.setDownloadCount(book.getDownloadCount() + 1);
+        bookRepository.save(book);
+
+        // Dynamically generate the download link using the stored Public ID and Resource Type.
+        // This MUST now generate a valid link structure.
+        return cloudinaryManager.generateDownloadUrl(book.getPublicId(), book.getResourceType());
+    }
+
+    public void deleteBook(Long id, String email) throws Exception {
+        User user = findUserByEmail(email);
+        Book book = getBook(id);
+
+        if(user.getRole() != User.Role.ADMIN && !book.getUploadedByUserId().equals(user.getId())) {
+            throw new Exception("Unauthorized");
         }
-        
-        // Reject all other file types
-        throw new IOException("Invalid file type. Only PDF files are allowed.");
+
+        cloudinaryManager.deleteFile(book.getPublicId());
+        bookRepository.delete(book);
     }
 
-    // --- LOGIC 2: Multi-Account Upload (Failover) ---
-    public Map<String, Object> uploadFile(MultipartFile file) throws IOException {
-        String folder = getTargetFolder(Objects.requireNonNull(file.getOriginalFilename()));
-        File tempFile = convert(file);
-        
-        Map params = ObjectUtils.asMap("resource_type", "auto", "folder", folder);
-
-        for (int i = 0; i < cloudinaryAccounts.size(); i++) {
-            try {
-                Map result = cloudinaryAccounts.get(i).uploader().upload(tempFile, params);
-                result.put("account_index", i);
-                if (tempFile.exists()) tempFile.delete();
-                System.out.println("Upload successful on Account " + (i + 1));
-                return result;
-            } catch (Exception e) {
-                System.err.println("Upload failed on Account " + (i + 1) + ": " + e.getMessage());
-            }
-        }
-        if (tempFile.exists()) tempFile.delete();
-        throw new IOException("All 5 Cloudinary accounts are full or unavailable.");
+    // Admin Only
+    public void deleteUser(Long userId, String adminEmail) throws Exception {
+        User admin = findUserByEmail(adminEmail);
+        if(admin.getRole() != User.Role.ADMIN) throw new Exception("Not Admin");
+        userRepository.deleteById(userId);
     }
 
-    // 🔥 FINAL FIX: Guaranteed PDF Download Logic (Removes format/type forcing)
-    public String generateDownloadUrl(String publicId, String resourceType) {
-        if (cloudinaryAccounts.isEmpty()) return "";
-        
-        // Attachment flag forces download behavior
-        Transformation t = new Transformation().flags("attachment");
-        
-        // We use the saved resourceType directly (e.g., 'image' for PDF)
-        // and add a format hint to PDF if necessary, but keep the core logic simple.
-        
-        return cloudinaryAccounts.get(0).url()
-                .resourceType(resourceType) 
-                .transformation(t)
-                .generate(publicId);
-    }
-
-    public String generatePreviewUrl(String publicId, String resourceType) {
-        if (cloudinaryAccounts.isEmpty()) return "";
-        
-        // Preview logic: Hamesha 'image' resource type use karein, bhale hi file PDF हो
-        if ("image".equals(resourceType) || publicId.contains("documents")) {
-            return cloudinaryAccounts.get(0).url()
-                    .resourceType("image")
-                    .transformation(new Transformation().width(400).crop("limit").page(1).fetchFormat("jpg"))
-                    .generate(publicId);
-        }
-        return "https://placehold.co/400x600?text=Document+Preview";
-    }
-
-    public void deleteFile(String publicId) {
-        for (Cloudinary account : cloudinaryAccounts) {
-            try {
-                account.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "image"));
-                account.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "raw"));
-            } catch (Exception ignored) {}
-        }
-    }
-
-    private File convert(MultipartFile file) throws IOException {
-        File convFile = Files.createTempFile("upload_", Objects.requireNonNull(file.getOriginalFilename())).toFile();
-        try (FileOutputStream fos = new FileOutputStream(convFile)) {
-            fos.write(file.getBytes());
-        }
-        return convFile;
+    public List<User> getAllUsers(String adminEmail) throws Exception {
+        User admin = findUserByEmail(adminEmail);
+        if(admin.getRole() != User.Role.ADMIN) throw new Exception("Not Admin");
+        return userRepository.findAll();
     }
 }

@@ -19,8 +19,9 @@ public class Book {
     // Cloudinary ya S3 link
     private String downloadUrl;
 
-    // Cloudinary public ID for deletion and thumbnail
-    private String filePublicId;
+    // FIX: Changed name from filePublicId to publicId. This ensures the generated getter
+    // is getPublicId(), resolving the compilation error in the controller.
+    private String publicId;
 
     // Uploader's user ID (for permission checks)
     private Long uploadedByUserId;

@@ -10,7 +10,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.file.Files; // New Import
+import java.nio.file.Files; // Zaroori FIX: Temporary file creation ke liye
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -19,8 +19,10 @@ import java.util.Objects;
 @Service
 public class CloudinaryManager {
 
+    // List to hold all 5 Cloudinary accounts
     private final List<Cloudinary> cloudinaryAccounts = new ArrayList<>();
 
+    // Constructor injection for all 5 accounts from application.properties
     public CloudinaryManager(
             @Value("${cloudinary.acc1.name}") String n1, @Value("${cloudinary.acc1.key}") String k1, @Value("${cloudinary.acc1.secret}") String s1,
             @Value("${cloudinary.acc2.name}") String n2, @Value("${cloudinary.acc2.key}") String k2, @Value("${cloudinary.acc2.secret}") String s2,
@@ -28,6 +30,7 @@ public class CloudinaryManager {
             @Value("${cloudinary.acc4.name}") String n4, @Value("${cloudinary.acc4.key}") String k4, @Value("${cloudinary.acc4.secret}") String s4,
             @Value("${cloudinary.acc5.name}") String n5, @Value("${cloudinary.acc5.key}") String k5, @Value("${cloudinary.acc5.secret}") String s5
     ) {
+        // Add accounts to list in order
         addAccount(n1, k1, s1);
         addAccount(n2, k2, s2);
         addAccount(n3, k3, s3);
@@ -38,14 +41,15 @@ public class CloudinaryManager {
     private void addAccount(String name, String key, String secret) {
         if (name != null && !name.isEmpty()) {
             cloudinaryAccounts.add(new Cloudinary(ObjectUtils.asMap(
-                    "cloud_name", name, 
-                    "api_key", key, 
-                    "api_secret", secret, 
+                    "cloud_name", name,
+                    "api_key", key,
+                    "api_secret", secret,
                     "secure", true
             )));
         }
     }
 
+    // --- LOGIC 1: Validation ---
     private String getTargetFolder(String filename) throws IOException {
         String lower = filename.toLowerCase();
         if (lower.endsWith(".pdf") || lower.endsWith(".doc") || lower.endsWith(".docx")) return "library-system/documents";
@@ -53,37 +57,47 @@ public class CloudinaryManager {
         throw new IOException("Only PDF, DOCX, and Image files are allowed.");
     }
 
+    // --- LOGIC 2: Multi-Account Upload (Failover) ---
     public Map<String, Object> uploadFile(MultipartFile file) throws IOException {
         String folder = getTargetFolder(Objects.requireNonNull(file.getOriginalFilename()));
-        File tempFile = convert(file); // Fixed convert method call
+        File tempFile = convert(file);
 
         Map params = ObjectUtils.asMap("resource_type", "auto", "folder", folder);
-        
+
+        // Try accounts one by one
         for (int i = 0; i < cloudinaryAccounts.size(); i++) {
             Cloudinary currentAccount = cloudinaryAccounts.get(i);
             try {
+                // Attempt upload
                 Map result = currentAccount.uploader().upload(tempFile, params);
+
+                // Add account index metadata to result so we know where it went (optional but helpful)
                 result.put("account_index", i);
-                
-                // Success - Clean up and return
+
+                // Delete temp file after success
                 if (tempFile.exists()) tempFile.delete();
+
                 System.out.println("Upload successful on Account " + (i + 1));
                 return result;
 
             } catch (Exception e) {
-                // Log the specific error from Cloudinary
+                // If error (Storage Full, Network issue, etc.), Log and Continue to next account
                 System.err.println("Upload failed on Account " + (i + 1) + ": " + e.getMessage());
-                e.printStackTrace(); 
+                System.err.println("Switching to next account...");
             }
         }
 
-        // Cleanup if all fail
+        // If loop finishes and file still not uploaded
         if (tempFile.exists()) tempFile.delete();
-        throw new IOException("Internal Error: Could not upload to any Cloudinary account. Check logs.");
+        throw new IOException("All 5 Cloudinary accounts are full or unavailable. Upload failed.");
     }
 
+    // --- LOGIC 3: Smart URL Generation ---
+    // Note: Since we have multiple accounts, relying on the stored "secure_url" in your database is best.
+    // However, these methods default to the first account or can be adapted.
     public String generateDownloadUrl(String publicId, String resourceType) {
         if (cloudinaryAccounts.isEmpty()) return "";
+        // Defaulting to first account logic for dynamic generation
         return cloudinaryAccounts.get(0).url()
                 .resourceType(resourceType)
                 .transformation(new Transformation().flags("attachment"))
@@ -101,20 +115,25 @@ public class CloudinaryManager {
         return "https://placehold.co/400x600?text=Document+Preview";
     }
 
+    // --- LOGIC 4: Multi-Account Delete ---
     public void deleteFile(String publicId) {
+        // We don't know which account has the file, so we try to delete from ALL.
+        // This ensures the file is removed regardless of where it is stored.
         for (Cloudinary account : cloudinaryAccounts) {
             try {
                 account.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "image"));
                 account.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "raw"));
                 account.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "video"));
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                // Ignore errors if file not found in this specific account
+            }
         }
     }
 
-    // FIX: Use System Temp Directory instead of Root
+    // 🔥 CRITICAL FIX: Use Files.createTempFile to avoid Permission Denied (500 Internal Server Error)
     private File convert(MultipartFile file) throws IOException {
-        // Creates a file in /tmp or C:\Users\AppData\Local\Temp which is always writable
-        File convFile = Files.createTempFile("upload_", "_" + file.getOriginalFilename()).toFile();
+        // Creates a file in the system's temporary directory, which is always writable on cloud platforms.
+        File convFile = Files.createTempFile("upload_", Objects.requireNonNull(file.getOriginalFilename())).toFile();
         try (FileOutputStream fos = new FileOutputStream(convFile)) {
             fos.write(file.getBytes());
         }

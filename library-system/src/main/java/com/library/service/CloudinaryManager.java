@@ -76,22 +76,20 @@ public class CloudinaryManager {
         throw new IOException("All 5 Cloudinary accounts are full or unavailable.");
     }
 
-    // 🔥 CRITICAL FINAL FIX: PDF Download ko zaroor 'image' resource type se hi dhoondho.
+    // 🔥 FINAL FIX: Download URL (Most reliable form)
     public String generateDownloadUrl(String publicId, String resourceType) {
         if (cloudinaryAccounts.isEmpty()) return "";
         
         // Attachment flag forces download behavior
         Transformation t = new Transformation().flags("attachment");
-        String finalResourceType = resourceType;
         
-        // Agar file documents folder mein hai (PDF), toh hum 'image' resource type ko force karte hain.
-        // Ye 404 error ko fix karega jo 'raw' resource type use karne par aata tha.
-        if (publicId.contains("documents")) {
-             finalResourceType = "image"; 
-        }
+        // NOTE: Hum Public ID ka istemal karke seedha URL generate kar rahe hain. 
+        // Cloudinary automatic /raw/ ya /image/ me se sahi wala chunega
+        // agar hum resourceType ko 'auto' (null) rakhen, ya uski saved value use karein.
         
+        // Hum yahan 'raw' ya 'image' ko force nahi kar rahe hain.
         return cloudinaryAccounts.get(0).url()
-                .resourceType(finalResourceType) 
+                .resourceType(resourceType) // Use saved resourceType
                 .transformation(t)
                 .generate(publicId);
     }

@@ -38,92 +38,72 @@ public class CloudinaryManager {
     private void addAccount(String name, String key, String secret) {
         if (name != null && !name.isEmpty()) {
             cloudinaryAccounts.add(new Cloudinary(ObjectUtils.asMap(
-                    "cloud_name", name,
-                    "api_key", key,
-                    "api_secret", secret,
-                    "secure", true
+                    "cloud_name", name, "api_key", key, "api_secret", secret, "secure", true
             )));
         }
     }
 
-    // --- LOGIC 1: Validation (STRICT PDF ONLY) ---
     private String getTargetFolder(String filename) throws IOException {
         String lower = filename.toLowerCase();
-        
-        // Sirf .pdf allowed hai. Baki sab reject.
-        if (lower.endsWith(".pdf")) {
-            return "library-system/documents";
-        }
-        
-        // Agar image, video, docx ya kuch aur ho to error throw karein
-        throw new IOException("Invalid file type. Only PDF files are allowed.");
+        if (lower.endsWith(".pdf") || lower.endsWith(".doc") || lower.endsWith(".docx")) return "library-system/documents";
+        if (lower.matches(".*\\.(jpg|jpeg|png)$")) return "library-system/images";
+        throw new IOException("Only PDF, DOCX, and Image files are allowed.");
     }
 
-    // --- LOGIC 2: Multi-Account Upload (Failover) ---
     public Map<String, Object> uploadFile(MultipartFile file) throws IOException {
         String folder = getTargetFolder(Objects.requireNonNull(file.getOriginalFilename()));
         File tempFile = convert(file);
-
-        // Upload ke liye 'auto' resource type best hai, Cloudinary khud detect karega ki ye PDF hai
+        
+        // 'auto' resource type allows Cloudinary to decide if it's image (PDF) or raw (DOCX)
         Map params = ObjectUtils.asMap("resource_type", "auto", "folder", folder);
 
         for (int i = 0; i < cloudinaryAccounts.size(); i++) {
-            Cloudinary currentAccount = cloudinaryAccounts.get(i);
             try {
-                Map result = currentAccount.uploader().upload(tempFile, params);
+                Map result = cloudinaryAccounts.get(i).uploader().upload(tempFile, params);
                 result.put("account_index", i);
-                
                 if (tempFile.exists()) tempFile.delete();
-
                 System.out.println("Upload successful on Account " + (i + 1));
                 return result;
-
             } catch (Exception e) {
                 System.err.println("Upload failed on Account " + (i + 1) + ": " + e.getMessage());
-                System.err.println("Switching to next account...");
             }
         }
-
         if (tempFile.exists()) tempFile.delete();
-        throw new IOException("All 5 Cloudinary accounts are full or unavailable. Upload failed.");
+        throw new IOException("All 5 Cloudinary accounts are full or unavailable.");
     }
 
-    // --- LOGIC 3: Smart URL Generation ---
+    // 🔥 FIX: Remove logic that forces 'raw'. Trust the 'resourceType' from DB.
     public String generateDownloadUrl(String publicId, String resourceType) {
         if (cloudinaryAccounts.isEmpty()) return "";
         
-        // Note: Hum force 'raw' nahi kar rahe kyunki agar Cloudinary ne PDF ko 'image' ki tarah store kiya hai
-        // to 'raw' URL 404 dega. Hum stored 'resourceType' use karenge aur 'attachment' flag lagayenge.
-        
+        // 'attachment' flag forces the browser to download the file instead of opening it
         Transformation t = new Transformation().flags("attachment");
         
+        // Important: We use the resourceType that was saved during upload (image or raw).
+        // If we force 'raw' for a PDF stored as 'image', we get a 404 error.
+        
         return cloudinaryAccounts.get(0).url()
-                .resourceType(resourceType) // Use whatever Cloudinary assigned (image/raw)
+                .resourceType(resourceType) 
                 .transformation(t)
                 .generate(publicId);
     }
 
     public String generatePreviewUrl(String publicId, String resourceType) {
         if (cloudinaryAccounts.isEmpty()) return "";
-        
-        // Preview sirf tab generate karein agar resource image ya pdf (stored as image) ho
-        // Documents folder check extra safety ke liye hai
-        if ("image".equals(resourceType) || publicId.contains("documents")) {
+        // Only generate image previews for resources stored as images (includes PDFs)
+        if ("image".equals(resourceType)) {
             return cloudinaryAccounts.get(0).url()
-                    .resourceType("image") // Preview hamesha image hota hai
-                    // PDF ke page 1 ko JPG mein convert karke dikhata hai
+                    .resourceType("image")
                     .transformation(new Transformation().width(400).crop("limit").page(1).fetchFormat("jpg"))
                     .generate(publicId);
         }
-        // Fallback for unexpected types
         return "https://placehold.co/400x600?text=Document+Preview";
     }
 
-    // --- LOGIC 4: Multi-Account Delete ---
     public void deleteFile(String publicId) {
         for (Cloudinary account : cloudinaryAccounts) {
             try {
-                // PDF kabhi image, kabhi raw ho sakta hai, isliye sab try karein
+                // Try deleting as both types just in case
                 account.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "image"));
                 account.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "raw"));
             } catch (Exception ignored) {}
@@ -131,7 +111,6 @@ public class CloudinaryManager {
     }
 
     private File convert(MultipartFile file) throws IOException {
-        // System temp folder use karein (Render friendly)
         File convFile = Files.createTempFile("upload_", Objects.requireNonNull(file.getOriginalFilename())).toFile();
         try (FileOutputStream fos = new FileOutputStream(convFile)) {
             fos.write(file.getBytes());

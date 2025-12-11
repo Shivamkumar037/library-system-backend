@@ -1,17 +1,24 @@
-FROM eclipse-temurin:21-jdk-alpine
+# Stage 1: Build the application
+# Use Java 21 to match your pom.xml configuration
+FROM maven:3.9-eclipse-temurin-21-alpine AS build
+WORKDIR /app
+COPY . .
+# Clean package runs to generate the jar
+RUN mvn clean package -DskipTests
 
+# Stage 2: Run the application
+# Use Java 21 JRE for running
+FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 
-# Copy everything (including .mvn and mvnw)
-COPY . .
+# 👇 CRITICAL FIX:
+# 1. Hum build stage se sahi file copy kar rahe hain (1.0.0-ENTERPRISE)
+# 2. Hum use rename karke 'app.jar' bana rahe hain taaki naam ka confusion khatam ho jaye
+COPY --from=build /app/target/library-system-1.0.0-ENTERPRISE.jar app.jar
 
-# Make mvnw executable and build
-RUN chmod +x ./mvnw && ./mvnw clean package -DskipTests
-
-# Port setup for Render
+# Render specific port handling
 ENV PORT=8080
 EXPOSE 8080
 
-# Run the JAR (note: check the exact jar name in target/)
-CMD ["sh", "-c", "java -jar target/library-system-0.0.1-SNAPSHOT.jar --server.port=${PORT}"]
-
+# Ab command hamesha 'app.jar' chalayega, chahe version kuch bhi ho
+ENTRYPOINT ["java", "-jar", "app.jar"]

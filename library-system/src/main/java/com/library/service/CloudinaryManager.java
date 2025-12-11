@@ -10,7 +10,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.file.Files;
+import java.nio.file.Files; 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +21,7 @@ public class CloudinaryManager {
 
     private final List<Cloudinary> cloudinaryAccounts = new ArrayList<>();
 
+    // Constructor Injection (Unchanged)
     public CloudinaryManager(
             @Value("${cloudinary.acc1.name}") String n1, @Value("${cloudinary.acc1.key}") String k1, @Value("${cloudinary.acc1.secret}") String s1,
             @Value("${cloudinary.acc2.name}") String n2, @Value("${cloudinary.acc2.key}") String k2, @Value("${cloudinary.acc2.secret}") String s2,
@@ -52,7 +53,7 @@ public class CloudinaryManager {
             return "library-system/documents";
         }
         
-        // Reject all other file types (DOCX, Images, etc.)
+        // Reject all other file types
         throw new IOException("Invalid file type. Only PDF files are allowed.");
     }
 
@@ -79,15 +80,14 @@ public class CloudinaryManager {
         throw new IOException("All 5 Cloudinary accounts are full or unavailable.");
     }
 
-    // 🔥 FIX: Generate Download URL without forcing raw/image type changes.
-    // We rely on the attachment flag and the original file's extension.
+    // 🔥 FINAL FIX: Generate Download URL using stored resource type (prevents 404)
     public String generateDownloadUrl(String publicId, String resourceType) {
         if (cloudinaryAccounts.isEmpty()) return "";
         
         Transformation t = new Transformation().flags("attachment");
         
-        // PDF files are best accessed using their initial resource type (image or auto) 
-        // with the attachment flag.
+        // Use the saved resourceType directly (which is 'image' for PDFs)
+        // Cloudinary is smart enough to serve the underlying PDF file if 'fl_attachment' is used.
         
         return cloudinaryAccounts.get(0).url()
                 .resourceType(resourceType) 
@@ -95,15 +95,17 @@ public class CloudinaryManager {
                 .generate(publicId);
     }
 
-    // Preview Logic: Still generates page 1 as JPG for thumbnail display
     public String generatePreviewUrl(String publicId, String resourceType) {
         if (cloudinaryAccounts.isEmpty()) return "";
         
-        // PDF previews are always generated as images
-        return cloudinaryAccounts.get(0).url()
-                .resourceType("image")
-                .transformation(new Transformation().width(400).crop("limit").page(1).fetchFormat("jpg"))
-                .generate(publicId);
+        // Preview logic: Hamesha 'image' resource type use karein, bhale hi file PDF ho.
+        if ("image".equals(resourceType) || publicId.contains("documents")) {
+            return cloudinaryAccounts.get(0).url()
+                    .resourceType("image")
+                    .transformation(new Transformation().width(400).crop("limit").page(1).fetchFormat("jpg"))
+                    .generate(publicId);
+        }
+        return "https://placehold.co/400x600?text=Document+Preview";
     }
 
     public void deleteFile(String publicId) {

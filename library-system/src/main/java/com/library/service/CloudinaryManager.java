@@ -10,7 +10,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.file.Files; 
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -21,7 +21,6 @@ public class CloudinaryManager {
 
     private final List<Cloudinary> cloudinaryAccounts = new ArrayList<>();
 
-    // Constructor Injection (Unchanged)
     public CloudinaryManager(
             @Value("${cloudinary.acc1.name}") String n1, @Value("${cloudinary.acc1.key}") String k1, @Value("${cloudinary.acc1.secret}") String s1,
             @Value("${cloudinary.acc2.name}") String n2, @Value("${cloudinary.acc2.key}") String k2, @Value("${cloudinary.acc2.secret}") String s2,
@@ -47,13 +46,17 @@ public class CloudinaryManager {
         }
     }
 
-    // --- LOGIC 1: Validation ---
+    // --- LOGIC 1: Validation (STRICT PDF ONLY) ---
     private String getTargetFolder(String filename) throws IOException {
         String lower = filename.toLowerCase();
-        // Here we map file extensions to the documents folder
-        if (lower.endsWith(".pdf") || lower.endsWith(".doc") || lower.endsWith(".docx")) return "library-system/documents";
-        if (lower.matches(".*\\.(jpg|jpeg|png)$")) return "library-system/images";
-        throw new IOException("Only PDF, DOCX, and Image files are allowed.");
+        
+        // Sirf .pdf allowed hai. Baki sab reject.
+        if (lower.endsWith(".pdf")) {
+            return "library-system/documents";
+        }
+        
+        // Agar image, video, docx ya kuch aur ho to error throw karein
+        throw new IOException("Invalid file type. Only PDF files are allowed.");
     }
 
     // --- LOGIC 2: Multi-Account Upload (Failover) ---
@@ -61,6 +64,7 @@ public class CloudinaryManager {
         String folder = getTargetFolder(Objects.requireNonNull(file.getOriginalFilename()));
         File tempFile = convert(file);
 
+        // Upload ke liye 'auto' resource type best hai, Cloudinary khud detect karega ki ye PDF hai
         Map params = ObjectUtils.asMap("resource_type", "auto", "folder", folder);
 
         for (int i = 0; i < cloudinaryAccounts.size(); i++) {
@@ -84,48 +88,34 @@ public class CloudinaryManager {
         throw new IOException("All 5 Cloudinary accounts are full or unavailable. Upload failed.");
     }
 
-    // --- LOGIC 3: Smart URL Generation (FINAL FIX for Download Format) ---
+    // --- LOGIC 3: Smart URL Generation ---
     public String generateDownloadUrl(String publicId, String resourceType) {
         if (cloudinaryAccounts.isEmpty()) return "";
         
-        // Flags to force download behavior
-        Transformation t = new Transformation().flags("attachment");
-        String finalResourceType = resourceType; 
-
-        // If it's a document (PDF, DOCX)
-        if (publicId.contains("documents")) {
-            // Force Cloudinary to treat it as a 'raw' file (best for documents)
-            finalResourceType = "raw";
-            
-            // We strip any format transformation on the file itself to maintain original quality,
-            // relying on the raw resource type and original extension for correct download.
-            // If the original upload was PDF, Cloudinary will serve PDF.
-        } else if ("image".equals(resourceType)) {
-             // For standard images, keep resourceType as image
-             finalResourceType = "image";
-        }
+        // Note: Hum force 'raw' nahi kar rahe kyunki agar Cloudinary ne PDF ko 'image' ki tarah store kiya hai
+        // to 'raw' URL 404 dega. Hum stored 'resourceType' use karenge aur 'attachment' flag lagayenge.
         
-        String url = cloudinaryAccounts.get(0).url()
-                .resourceType(finalResourceType)
+        Transformation t = new Transformation().flags("attachment");
+        
+        return cloudinaryAccounts.get(0).url()
+                .resourceType(resourceType) // Use whatever Cloudinary assigned (image/raw)
                 .transformation(t)
                 .generate(publicId);
-                
-        System.out.println("Generated Download URL: " + url);
-        
-        return url;
     }
 
     public String generatePreviewUrl(String publicId, String resourceType) {
         if (cloudinaryAccounts.isEmpty()) return "";
-        // Preview hamesha image format mein generate hoga (page 1)
-        // Note: width(400) limits the quality for faster loading.
-        if ("image".equals(resourceType) || publicId.contains("documents")) { 
+        
+        // Preview sirf tab generate karein agar resource image ya pdf (stored as image) ho
+        // Documents folder check extra safety ke liye hai
+        if ("image".equals(resourceType) || publicId.contains("documents")) {
             return cloudinaryAccounts.get(0).url()
-                    .resourceType("image")
-                    // Note: No format specified here, let Cloudinary determine optimal JPG quality
+                    .resourceType("image") // Preview hamesha image hota hai
+                    // PDF ke page 1 ko JPG mein convert karke dikhata hai
                     .transformation(new Transformation().width(400).crop("limit").page(1).fetchFormat("jpg"))
                     .generate(publicId);
         }
+        // Fallback for unexpected types
         return "https://placehold.co/400x600?text=Document+Preview";
     }
 
@@ -133,15 +123,15 @@ public class CloudinaryManager {
     public void deleteFile(String publicId) {
         for (Cloudinary account : cloudinaryAccounts) {
             try {
+                // PDF kabhi image, kabhi raw ho sakta hai, isliye sab try karein
                 account.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "image"));
                 account.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "raw"));
-                account.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "video"));
             } catch (Exception ignored) {}
         }
     }
 
-    // 🔥 CRITICAL FIX: Use Files.createTempFile to avoid Permission Denied
     private File convert(MultipartFile file) throws IOException {
+        // System temp folder use karein (Render friendly)
         File convFile = Files.createTempFile("upload_", Objects.requireNonNull(file.getOriginalFilename())).toFile();
         try (FileOutputStream fos = new FileOutputStream(convFile)) {
             fos.write(file.getBytes());

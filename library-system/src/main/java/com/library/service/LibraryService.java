@@ -6,6 +6,7 @@ import com.library.repository.BookRepository;
 import com.library.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional; // Added for safety if not present
 import org.springframework.web.multipart.MultipartFile;
 import java.util.List;
 import java.util.Map;
@@ -17,17 +18,24 @@ public class LibraryService {
     @Autowired private BookRepository bookRepository;
     @Autowired private CloudinaryManager cloudinaryManager;
 
+    // --- Helper Method ---
+    // Assuming Book model has getters for getPublicId() and getResourceType()
+    private User findUserByEmail(String email) throws Exception {
+        return userRepository.findByEmail(email).orElseThrow(() -> new Exception("User not found"));
+    }
+    
     // --- USER ---
     public User register(User user, String secretCode) throws Exception {
         if (userRepository.findByEmail(user.getEmail()).isPresent()) {
             throw new Exception("Email already exists.");
         }
+        // Note: Register method uses 'secretCode' for admin role check
         user.setRole("ADMIN_SECRET_CODE".equals(secretCode) ? User.Role.ADMIN : User.Role.STUDENT);
         return userRepository.save(user);
     }
 
     public User login(String email, String password) throws Exception {
-        User user = userRepository.findByEmail(email).orElseThrow(() -> new Exception("User not found"));
+        User user = findUserByEmail(email);
         if (!user.getPassword().equals(password)) throw new Exception("Wrong password");
         if (!user.isActive()) throw new Exception("Account is banned.");
 
@@ -36,11 +44,12 @@ public class LibraryService {
     }
 
     // --- BOOK ---
+    @Transactional
     public Book uploadBook(String title, String desc, MultipartFile file, String email) throws Exception {
-        User uploader = userRepository.findByEmail(email).orElseThrow(() -> new Exception("User not found"));
+        User uploader = findUserByEmail(email);
         if (!uploader.isActive()) throw new Exception("You are banned from uploading.");
 
-        // 1. Upload to Cloudinary
+        // 1. Upload to Cloudinary (will use 'auto' resource type, likely 'image' for PDF)
         Map<String, Object> result = cloudinaryManager.uploadFile(file);
 
         String publicId = (String) result.get("public_id");
@@ -48,7 +57,7 @@ public class LibraryService {
         String format = (String) result.get("format");
         Long bytes = Long.valueOf(result.get("bytes").toString());
 
-        // 2. Generate Smart URLs
+        // 2. Generate URLs
         String dlUrl = cloudinaryManager.generateDownloadUrl(publicId, resType);
         String thumbUrl = cloudinaryManager.generatePreviewUrl(publicId, resType);
 
@@ -58,8 +67,11 @@ public class LibraryService {
         book.setDescription(desc);
         book.setDownloadUrl(dlUrl);
         book.setThumbnailUrl(thumbUrl);
+        
+        // IMPORTANT: Save these fields to regenerate the correct download URL later
         book.setPublicId(publicId);
-        book.setResourceType(resType);
+        book.setResourceType(resType); 
+        
         book.setFileFormat(format);
         book.setFileSize(bytes);
         book.setUploadedByUserId(uploader.getId());
@@ -76,16 +88,20 @@ public class LibraryService {
         return bookRepository.findById(id).orElseThrow(() -> new Exception("Book not found"));
     }
 
-    // Increment download count logic
+    // 🔥 FIX: Increment download count AND dynamically regenerate the correct download URL
+    @Transactional
     public String trackDownload(Long bookId) throws Exception {
         Book book = getBook(bookId);
         book.setDownloadCount(book.getDownloadCount() + 1);
         bookRepository.save(book);
-        return book.getDownloadUrl(); // Return the safe link
+        
+        // Dynamically generate the download link using the stored Public ID and Resource Type.
+        // This ensures we get the current, correct link (e.g., using /image/upload/... instead of /raw/upload/...)
+        return cloudinaryManager.generateDownloadUrl(book.getPublicId(), book.getResourceType());
     }
 
     public void deleteBook(Long id, String email) throws Exception {
-        User user = userRepository.findByEmail(email).orElseThrow(()->new Exception("User error"));
+        User user = findUserByEmail(email);
         Book book = getBook(id);
 
         if(user.getRole() != User.Role.ADMIN && !book.getUploadedByUserId().equals(user.getId())) {
@@ -98,13 +114,13 @@ public class LibraryService {
 
     // Admin Only
     public void deleteUser(Long userId, String adminEmail) throws Exception {
-        User admin = userRepository.findByEmail(adminEmail).orElseThrow();
+        User admin = findUserByEmail(adminEmail);
         if(admin.getRole() != User.Role.ADMIN) throw new Exception("Not Admin");
         userRepository.deleteById(userId);
     }
 
     public List<User> getAllUsers(String adminEmail) throws Exception {
-        User admin = userRepository.findByEmail(adminEmail).orElseThrow();
+        User admin = findUserByEmail(adminEmail);
         if(admin.getRole() != User.Role.ADMIN) throw new Exception("Not Admin");
         return userRepository.findAll();
     }

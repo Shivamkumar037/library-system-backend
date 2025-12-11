@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 @Service
 public class CloudinaryManager {
@@ -48,14 +49,14 @@ public class CloudinaryManager {
     private String validateAndDetermineSubFolder(MultipartFile file) throws IOException {
         String originalFilename = file.getOriginalFilename();
         if (originalFilename == null) throw new IOException("Filename missing.");
-        
+
         String lowerCaseName = originalFilename.toLowerCase();
-        
+
         // STRICT CHECK: Only PDF or Word Docs allowed
         if (lowerCaseName.endsWith(".pdf") || lowerCaseName.endsWith(".doc") || lowerCaseName.endsWith(".docx")) {
             return "documents";
         }
-        
+
         throw new IOException("Invalid file type. Only PDF and MS Word (.doc, .docx) files are allowed.");
     }
 
@@ -63,7 +64,7 @@ public class CloudinaryManager {
     public Map<String, String> upload(MultipartFile multipartFile) throws IOException {
         String subFolder = validateAndDetermineSubFolder(multipartFile);
         String targetFolder = "library-system-files/" + subFolder;
-        
+
         File fileToUpload = convert(multipartFile);
         Exception lastException = null;
 
@@ -74,11 +75,11 @@ public class CloudinaryManager {
                     // Upload as 'auto' (Cloudinary detects pdf/raw)
                     Map<?, ?> result = client.uploader().upload(fileToUpload, ObjectUtils.asMap(
                             "resource_type", "auto",
-                            "folder", targetFolder)); 
-                            
+                            "folder", targetFolder));
+
                     String publicId = (String) result.get("public_id");
                     String resourceType = (String) result.get("resource_type");
-                    
+
                     // Generate basic download URL (Force attachment)
                     String downloadUrl = generateDownloadUrl(publicId, resourceType);
 
@@ -88,11 +89,11 @@ public class CloudinaryManager {
                     System.out.println("Upload Success on Account #" + (i + 1));
 
                     return Map.of(
-                            "url", downloadUrl, 
+                            "url", downloadUrl,
                             "public_id", publicId,
                             "thumbnail_url", thumbnailUrl,
-                            "resource_type", resourceType, 
-                            "folder", targetFolder,        
+                            "resource_type", resourceType,
+                            "folder", targetFolder,
                             "account_used", "Account " + (i + 1)
                     );
 

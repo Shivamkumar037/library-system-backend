@@ -11,6 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
@@ -72,13 +73,13 @@ public class LibraryController {
     public ResponseEntity<?> downloadBook(@PathVariable Long bookId) {
         try {
             Book book = service.getBookDetails(bookId);
-            // Resource type "raw" or "image" based on database or file extension usually. 
+            // Resource type "raw" or "image" based on database or file extension usually.
             // Assuming 'documents' are raw/image. CloudinaryManager handles 'auto' detection.
             // Ideally, Book model should store 'resourceType'. If not, we guess 'raw' for docs.
             String type = (book.getThumbnailUrl() != null && book.getThumbnailUrl().contains("/image/")) ? "image" : "raw";
-            
+
             String downloadLink = cloudinaryManager.generateDownloadUrl(book.getPublicId(), type);
-            
+
             // Redirect browser to the Cloudinary URL
             return ResponseEntity.status(HttpStatus.FOUND)
                     .location(URI.create(downloadLink))
@@ -135,8 +136,8 @@ public class LibraryController {
             Book book = service.uploadBook(bookName, description, file, uploaderIdentifier);
             return ResponseEntity.ok(book);
         } catch (IOException e) {
-             // Specific catch for validation errors (Invalid file type)
-             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            // Specific catch for validation errors (Invalid file type)
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", "Upload failed: " + e.getMessage()));
         }

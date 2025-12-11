@@ -10,15 +10,18 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.util.*;
+import java.nio.file.Files; 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 @Service
 public class CloudinaryManager {
 
     private final List<Cloudinary> cloudinaryAccounts = new ArrayList<>();
 
-    // ------------ CONSTRUCTOR (5 ACCOUNTS) ------------
+    // Constructor Injection (Unchanged)
     public CloudinaryManager(
             @Value("${cloudinary.acc1.name}") String n1, @Value("${cloudinary.acc1.key}") String k1, @Value("${cloudinary.acc1.secret}") String s1,
             @Value("${cloudinary.acc2.name}") String n2, @Value("${cloudinary.acc2.key}") String k2, @Value("${cloudinary.acc2.secret}") String s2,
@@ -44,125 +47,104 @@ public class CloudinaryManager {
         }
     }
 
-
-    // ------------ VALIDATION ------------
+    // --- LOGIC 1: Validation ---
     private String getTargetFolder(String filename) throws IOException {
         String lower = filename.toLowerCase();
-
-        if (lower.endsWith(".pdf") || lower.endsWith(".doc") || lower.endsWith(".docx"))
-            return "library-system/documents";
-
-        if (lower.matches(".*\\.(jpg|jpeg|png)$"))
-            return "library-system/images";
-
-        throw new IOException("Only PDF, DOCX and Images allowed.");
+        // Here we map file extensions to the documents folder
+        if (lower.endsWith(".pdf") || lower.endsWith(".doc") || lower.endsWith(".docx")) return "library-system/documents";
+        if (lower.matches(".*\\.(jpg|jpeg|png)$")) return "library-system/images";
+        throw new IOException("Only PDF, DOCX, and Image files are allowed.");
     }
 
-
-    // ------------ UPLOAD WITH FAILOVER ------------
+    // --- LOGIC 2: Multi-Account Upload (Failover) ---
     public Map<String, Object> uploadFile(MultipartFile file) throws IOException {
-
-        String folder = getTargetFolder(file.getOriginalFilename());
+        String folder = getTargetFolder(Objects.requireNonNull(file.getOriginalFilename()));
         File tempFile = convert(file);
 
         Map params = ObjectUtils.asMap("resource_type", "auto", "folder", folder);
 
         for (int i = 0; i < cloudinaryAccounts.size(); i++) {
-
-            Cloudinary account = cloudinaryAccounts.get(i);
-
+            Cloudinary currentAccount = cloudinaryAccounts.get(i);
             try {
-                Map result = account.uploader().upload(tempFile, params);
+                Map result = currentAccount.uploader().upload(tempFile, params);
                 result.put("account_index", i);
+                
+                if (tempFile.exists()) tempFile.delete();
 
-                tempFile.delete();
+                System.out.println("Upload successful on Account " + (i + 1));
                 return result;
 
-            } catch (Exception ex) {
-                System.err.println("Failed on Account " + (i + 1) + ": " + ex.getMessage());
+            } catch (Exception e) {
+                System.err.println("Upload failed on Account " + (i + 1) + ": " + e.getMessage());
+                System.err.println("Switching to next account...");
             }
         }
 
-        tempFile.delete();
-        throw new IOException("All Cloudinary accounts failed.");
+        if (tempFile.exists()) tempFile.delete();
+        throw new IOException("All 5 Cloudinary accounts are full or unavailable. Upload failed.");
     }
 
-
-    // ------------ DETECT RESOURCE TYPE (for DB) ------------
-    public String detectForDB(String publicId) {
-        String id = publicId.toLowerCase();
-
-        if (id.contains("images")) return "image";
-        if (id.contains("documents")) return "raw";
-
-        return "raw";
-    }
-
-
-    // ------------ DOWNLOAD URL (AUTO) ------------
-    public String generateDownloadUrl(String publicId) {
-
+    // --- LOGIC 3: Smart URL Generation (FINAL FIX for Download Format) ---
+    public String generateDownloadUrl(String publicId, String resourceType) {
         if (cloudinaryAccounts.isEmpty()) return "";
+        
+        // Flags to force download behavior
+        Transformation t = new Transformation().flags("attachment");
+        String finalResourceType = resourceType; 
 
-        String resourceType = detectForDB(publicId);
-
-        return cloudinaryAccounts.get(0).url()
-                .resourceType(resourceType)
-                .transformation(new Transformation().flags("attachment"))
+        // If it's a document (PDF, DOCX)
+        if (publicId.contains("documents")) {
+            // Force Cloudinary to treat it as a 'raw' file (best for documents)
+            finalResourceType = "raw";
+            
+            // We strip any format transformation on the file itself to maintain original quality,
+            // relying on the raw resource type and original extension for correct download.
+            // If the original upload was PDF, Cloudinary will serve PDF.
+        } else if ("image".equals(resourceType)) {
+             // For standard images, keep resourceType as image
+             finalResourceType = "image";
+        }
+        
+        String url = cloudinaryAccounts.get(0).url()
+                .resourceType(finalResourceType)
+                .transformation(t)
                 .generate(publicId);
+                
+        System.out.println("Generated Download URL: " + url);
+        
+        return url;
     }
 
-
-    // ------------ PREVIEW URL ------------
-    public String generatePreviewUrl(String publicId) {
-
+    public String generatePreviewUrl(String publicId, String resourceType) {
         if (cloudinaryAccounts.isEmpty()) return "";
-
-        String type = detectForDB(publicId);
-
-        // Images preview
-        if (type.equals("image")) {
+        // Preview hamesha image format mein generate hoga (page 1)
+        // Note: width(400) limits the quality for faster loading.
+        if ("image".equals(resourceType) || publicId.contains("documents")) { 
             return cloudinaryAccounts.get(0).url()
                     .resourceType("image")
-                    .transformation(
-                            new Transformation()
-                                    .width(400)
-                                    .crop("limit")
-                                    .fetchFormat("jpg")
-                    )
+                    // Note: No format specified here, let Cloudinary determine optimal JPG quality
+                    .transformation(new Transformation().width(400).crop("limit").page(1).fetchFormat("jpg"))
                     .generate(publicId);
         }
-
-        // PDF/DOC first page preview
-        return cloudinaryAccounts.get(0).url()
-                .resourceType("image")
-                .transformation(
-                        new Transformation()
-                                .page(1)
-                                .width(400)
-                                .crop("limit")
-                                .fetchFormat("jpg")
-                )
-                .generate(publicId);
+        return "https://placehold.co/400x600?text=Document+Preview";
     }
 
-
-    // ------------ DELETE FROM ALL ACCOUNTS ------------
+    // --- LOGIC 4: Multi-Account Delete ---
     public void deleteFile(String publicId) {
-
         for (Cloudinary account : cloudinaryAccounts) {
-            try { account.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "image")); } catch (Exception ignored) {}
-            try { account.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "raw")); } catch (Exception ignored) {}
-            try { account.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "video")); } catch (Exception ignored) {}
+            try {
+                account.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "image"));
+                account.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "raw"));
+                account.uploader().destroy(publicId, ObjectUtils.asMap("resource_type", "video"));
+            } catch (Exception ignored) {}
         }
     }
 
-
-    // ------------ TEMP FILE CREATOR ------------
+    // 🔥 CRITICAL FIX: Use Files.createTempFile to avoid Permission Denied
     private File convert(MultipartFile file) throws IOException {
-        File convFile = Files.createTempFile("upload_", file.getOriginalFilename()).toFile();
-        try (FileOutputStream out = new FileOutputStream(convFile)) {
-            out.write(file.getBytes());
+        File convFile = Files.createTempFile("upload_", Objects.requireNonNull(file.getOriginalFilename())).toFile();
+        try (FileOutputStream fos = new FileOutputStream(convFile)) {
+            fos.write(file.getBytes());
         }
         return convFile;
     }

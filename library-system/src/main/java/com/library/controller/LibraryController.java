@@ -2,23 +2,30 @@ package com.library.controller;
 
 import com.library.model.Book;
 import com.library.model.User;
+import com.library.service.CloudinaryManager;
 import com.library.service.LibraryService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*; // Includes CrossOrigin
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.net.URI;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 @RestController
 @RequestMapping("/api")
-// FIX: Ye line sabhi origins (frontend links) ko allow karti hai
-@CrossOrigin(origins = "*") 
+@CrossOrigin(origins = "*")
 public class LibraryController {
 
     @Autowired
     private LibraryService service;
+
+    @Autowired
+    private CloudinaryManager cloudinaryManager;
 
     // --- Authentication ---
 
@@ -50,24 +57,72 @@ public class LibraryController {
         }
     }
 
-    // --- Home Page and Book Details ---
+    // --- Book Operations ---
 
     @GetMapping("/books/recent")
     public ResponseEntity<List<Book>> getRecentBooks() {
         return ResponseEntity.ok(service.getRecentBooks(35));
     }
 
-    @GetMapping("/books/details/{bookId}")
-    public ResponseEntity<?> getBookDetails(@PathVariable Long bookId) {
+    /**
+     * API to DOWNLOAD the file.
+     * Logic: Finds book -> Generates Attachment URL -> Redirects user to that URL.
+     */
+    @GetMapping("/books/download/{bookId}")
+    public ResponseEntity<?> downloadBook(@PathVariable Long bookId) {
         try {
             Book book = service.getBookDetails(bookId);
-            return ResponseEntity.ok(book);
+            // Resource type "raw" or "image" based on database or file extension usually. 
+            // Assuming 'documents' are raw/image. CloudinaryManager handles 'auto' detection.
+            // Ideally, Book model should store 'resourceType'. If not, we guess 'raw' for docs.
+            String type = (book.getThumbnailUrl() != null && book.getThumbnailUrl().contains("/image/")) ? "image" : "raw";
+            
+            String downloadLink = cloudinaryManager.generateDownloadUrl(book.getPublicId(), type);
+            
+            // Redirect browser to the Cloudinary URL
+            return ResponseEntity.status(HttpStatus.FOUND)
+                    .location(URI.create(downloadLink))
+                    .build();
         } catch (Exception e) {
-            return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(404).body(Map.of("error", "Download failed: " + e.getMessage()));
         }
     }
 
-    // --- User Book Management ---
+    /**
+     * API to VIEW/PREVIEW the file (Max 5 Pages).
+     * Logic: Returns JSON containing direct view link AND list of first 5 pages as images.
+     */
+    @GetMapping("/books/view/{bookId}")
+    public ResponseEntity<?> viewBook(@PathVariable Long bookId) {
+        try {
+            Book book = service.getBookDetails(bookId);
+            String type = (book.getThumbnailUrl() != null && book.getThumbnailUrl().contains("/image/")) ? "image" : "raw";
+
+            // 1. Full View Link (Opens PDF in browser)
+            String fullViewUrl = cloudinaryManager.generateViewUrl(book.getPublicId(), type);
+
+            // 2. Generate Preview Images for First 5 Pages
+            List<String> previewPages = new ArrayList<>();
+            // Only generate page previews if it's likely a PDF (indicated by image resource type in Cloudinary or extension)
+            // Note: Cloudinary 'raw' files (like DOCX) cannot generate page previews easily.
+            for (int i = 1; i <= 5; i++) {
+                String pageUrl = cloudinaryManager.generatePageImage(book.getPublicId(), i);
+                if (!pageUrl.isEmpty()) {
+                    previewPages.add(pageUrl);
+                }
+            }
+
+            return ResponseEntity.ok(Map.of(
+                    "bookId", book.getId(),
+                    "title", book.getBookName(),
+                    "fullViewUrl", fullViewUrl, // Link to open full PDF
+                    "previewPages", previewPages // Array of [page1.jpg, page2.jpg...]
+            ));
+
+        } catch (Exception e) {
+            return ResponseEntity.status(404).body(Map.of("error", "View failed: " + e.getMessage()));
+        }
+    }
 
     @PostMapping("/books/upload")
     public ResponseEntity<?> uploadBook(
@@ -76,17 +131,35 @@ public class LibraryController {
             @RequestParam("uploaderIdentifier") String uploaderIdentifier,
             @RequestParam("file") MultipartFile file) {
         try {
+            // Service will call CloudinaryManager.upload which has the validation logic
             Book book = service.uploadBook(bookName, description, file, uploaderIdentifier);
             return ResponseEntity.ok(book);
+        } catch (IOException e) {
+             // Specific catch for validation errors (Invalid file type)
+             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", "Upload failed: " + e.getMessage()));
         }
     }
 
+    /**
+     * API to get uploads by a specific USER.
+     * This allows seeing what others have uploaded.
+     */
     @GetMapping("/books/user/{identifier}")
-    public ResponseEntity<List<Book>> getBooksByUser(@PathVariable String identifier) {
-        return ResponseEntity.ok(service.getBooksByUploader(identifier));
+    public ResponseEntity<?> getBooksByUser(@PathVariable String identifier) {
+        try {
+            List<Book> books = service.getBooksByUploader(identifier);
+            if (books.isEmpty()) {
+                return ResponseEntity.ok(Map.of("message", "No uploads found for this user", "books", new ArrayList<>()));
+            }
+            return ResponseEntity.ok(books);
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
     }
+
+    // --- Modification & Delete ---
 
     @PutMapping("/books/{bookId}")
     public ResponseEntity<?> updateBook(

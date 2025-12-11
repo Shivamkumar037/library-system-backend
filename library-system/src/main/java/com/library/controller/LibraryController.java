@@ -20,6 +20,7 @@ class LibraryController {
 
     @RestController
     @RequestMapping("/api/auth")
+     @CrossOrigin(origins = "*", allowedHeaders = "*", methods = {RequestMethod.GET, RequestMethod.POST, RequestMethod.DELETE, RequestMethod.OPTIONS})
     @RequiredArgsConstructor
     public static class AuthController {
         private final AuthService authService;
